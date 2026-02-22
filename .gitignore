@@ -1,0 +1,7 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+00-unprocessed-audio-recordings/
+01-transcripts/
+.claude/
