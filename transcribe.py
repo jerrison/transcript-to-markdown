@@ -345,12 +345,25 @@ def confirm_speakers(suggestions: dict, blocks: list[dict]) -> dict[str, str]:
         role = info.get("role", "")
         summary = info.get("summary", "")
 
+        # Collect distinctive passages from this speaker
+        speaker_blocks = [b for b in blocks if b["speaker"] == speaker]
+        excerpts = []
+        for b in speaker_blocks[:3]:
+            text = b["text"].strip()
+            if len(text) > 120:
+                text = text[:117] + "..."
+            excerpts.append(text)
+
         print(f"\n  Speaker {i} of {len(speakers)}:")
 
         if role:
             print(f"    Role: {role}")
         if summary:
             print(f"    Said: {summary}")
+        if excerpts:
+            print(f"    Passages:")
+            for excerpt in excerpts:
+                print(f"      > {excerpt}")
 
         if likely_name:
             print(f'    Suggested name: {likely_name}')
