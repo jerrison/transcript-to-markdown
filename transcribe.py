@@ -345,13 +345,15 @@ def confirm_speakers(suggestions: dict, blocks: list[dict]) -> dict[str, str]:
         role = info.get("role", "")
         summary = info.get("summary", "")
 
-        # Collect distinctive passages from this speaker
+        # Collect distinctive passages — longest blocks have the most substance
         speaker_blocks = [b for b in blocks if b["speaker"] == speaker]
+        substantive = [b for b in speaker_blocks if len(b["text"].strip()) > 30]
+        substantive.sort(key=lambda b: len(b["text"]), reverse=True)
         excerpts = []
-        for b in speaker_blocks[:3]:
+        for b in substantive[:3]:
             text = b["text"].strip()
-            if len(text) > 120:
-                text = text[:117] + "..."
+            if len(text) > 150:
+                text = text[:147] + "..."
             excerpts.append(text)
 
         print(f"\n  Speaker {i} of {len(speakers)}:")
