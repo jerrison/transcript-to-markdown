@@ -161,7 +161,7 @@ def test_file_io():
 
 
 def test_infer_speaker_names_mocked():
-    """Test infer_speaker_names with a mocked Gemini response (no API call)."""
+    """Test infer_speaker_names with a mocked OpenAI response (no API call)."""
     blocks = [
         {"speaker": "Speaker 1", "start": 0.0, "text": "Hi, I'm Sarah. Let's start the meeting."},
         {"speaker": "Speaker 2", "start": 5.0, "text": "Thanks Sarah, I'm Alex from engineering."},
@@ -185,13 +185,17 @@ def test_infer_speaker_names_mocked():
     import json
     from unittest.mock import MagicMock
 
+    mock_message = MagicMock()
+    mock_message.content = json.dumps(fake_response)
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
     mock_response = MagicMock()
-    mock_response.text = json.dumps(fake_response)
+    mock_response.choices = [mock_choice]
     mock_client = MagicMock()
-    mock_client.models.generate_content.return_value = mock_response
+    mock_client.chat.completions.create.return_value = mock_response
 
-    with patch("transcribe.load_google_api_key", return_value="fake-key"), \
-         patch("google.genai.Client", return_value=mock_client):
+    with patch("transcribe.load_openai_api_key", return_value="fake-key"), \
+         patch("openai.OpenAI", return_value=mock_client):
         result = infer_speaker_names(blocks)
 
     assert result == fake_response
@@ -199,14 +203,48 @@ def test_infer_speaker_names_mocked():
 
 
 def test_infer_speaker_names_no_key():
-    """Test that infer_speaker_names returns empty dict when no API key."""
+    """Test that infer_speaker_names returns empty dict when no API keys."""
     blocks = [{"speaker": "Speaker 1", "start": 0.0, "text": "Hello"}]
 
-    with patch("transcribe.load_google_api_key", return_value=None):
+    with patch("transcribe.load_openai_api_key", return_value=None), \
+         patch("transcribe.load_google_api_key", return_value=None), \
+         patch("builtins.input", return_value="skip"):
         result = infer_speaker_names(blocks)
 
     assert result == {}
     print("  infer_speaker_names (no key): OK")
+
+
+def test_infer_speaker_names_gemini_fallback():
+    """Test that infer_speaker_names falls back to Gemini when OpenAI key missing."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Hi, I'm Sarah."},
+    ]
+
+    fake_response = {
+        "Speaker 1": {
+            "likely_name": "Sarah",
+            "confidence": "high",
+            "role": "Speaker",
+            "summary": "Introduced themselves",
+        },
+    }
+
+    import json
+    from unittest.mock import MagicMock
+
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(fake_response)
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("transcribe.load_openai_api_key", return_value=None), \
+         patch("transcribe.load_google_api_key", return_value="fake-key"), \
+         patch("google.genai.Client", return_value=mock_client):
+        result = infer_speaker_names(blocks)
+
+    assert result == fake_response
+    print("  infer_speaker_names (gemini fallback): OK")
 
 
 def test_confirm_speakers_accept():
@@ -387,6 +425,7 @@ def main():
         test_file_io,
         test_infer_speaker_names_mocked,
         test_infer_speaker_names_no_key,
+        test_infer_speaker_names_gemini_fallback,
         test_confirm_speakers_accept,
         test_confirm_speakers_custom_name,
         test_confirm_speakers_skip,

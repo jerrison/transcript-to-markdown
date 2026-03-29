@@ -181,12 +181,23 @@ def build_blocks(words: list[dict], pause_threshold: float = 1.5) -> list[dict]:
     return blocks
 
 
-def load_google_api_key() -> str | None:
-    """Load Google API key from environment or .env file.
+def load_openai_api_key() -> str | None:
+    """Load OpenAI API key from environment or .env file."""
+    token = os.environ.get("OPENAI_API_KEY")
+    if token:
+        return token
 
-    If not found, prompts the user to enter it and saves to .env for future runs.
-    Returns None only if the user declines to provide a key.
-    """
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if line.startswith("OPENAI_API_KEY="):
+                return line.split("=", 1)[1].strip()
+
+    return None
+
+
+def load_google_api_key() -> str | None:
+    """Load Google API key from environment or .env file."""
     token = os.environ.get("GOOGLE_API_KEY")
     if token:
         return token
@@ -197,39 +208,19 @@ def load_google_api_key() -> str | None:
             if line.startswith("GOOGLE_API_KEY="):
                 return line.split("=", 1)[1].strip()
 
-    # Prompt user for key
-    print("\n  No GOOGLE_API_KEY found (needed for speaker identification).")
-    print("  Get one at: https://aistudio.google.com/apikey")
-    key = input("  Enter your Gemini API key [skip]: ").strip()
-    if not key or key.lower() == "skip":
-        return None
-
-    # Save to .env
-    if env_path.exists():
-        content = env_path.read_text()
-        if not content.endswith("\n"):
-            content += "\n"
-        content += f"GOOGLE_API_KEY={key}\n"
-    else:
-        content = f"GOOGLE_API_KEY={key}\n"
-    env_path.write_text(content)
-    print("  Saved to .env — you won't be asked again.")
-    return key
+    return None
 
 
 def infer_speaker_names(blocks: list[dict]) -> dict:
-    """Use Gemini Flash to guess speaker names from transcript context.
+    """Identify speaker names from transcript context using LLM.
 
+    Tries OpenAI (GPT-5.4) first, falls back to Gemini Flash.
     Returns a dict mapping speaker labels to suggestion dicts:
     {"Speaker 1": {"likely_name": "Sarah", "confidence": "high", "role": "...", "summary": "..."}}
 
     Returns empty dict if no API key or on failure.
     """
-    api_key = load_google_api_key()
-    if not api_key:
-        return {}
-
-    # Build a transcript snippet from first ~30 blocks
+    # Build prompt (shared by both providers)
     snippet_blocks = blocks[:30]
     snippet_lines = []
     for b in snippet_blocks:
@@ -255,25 +246,88 @@ Speakers to identify: {', '.join(speakers)}
 Transcript:
 {snippet}"""
 
-    try:
-        from google import genai
+    # Try OpenAI first
+    openai_key = load_openai_api_key()
+    if openai_key:
+        try:
+            result = _infer_with_openai(prompt, openai_key)
+            if result:
+                return result
+        except Exception as e:
+            print(f"  Warning: OpenAI speaker identification failed: {e}")
 
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt,
-        )
-        text = response.text.strip()
-        # Strip markdown code fences if present
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1]
-            if text.endswith("```"):
-                text = text[: text.rfind("```")]
-            text = text.strip()
-        return json.loads(text)
-    except Exception as e:
-        print(f"  Warning: LLM speaker identification failed: {e}")
-        return {}
+    # Fall back to Gemini
+    google_key = load_google_api_key()
+    if google_key:
+        try:
+            result = _infer_with_gemini(prompt, google_key)
+            if result:
+                return result
+        except Exception as e:
+            print(f"  Warning: Gemini speaker identification failed: {e}")
+
+    # No keys available — prompt user
+    print("\n  No OPENAI_API_KEY or GOOGLE_API_KEY found (needed for speaker identification).")
+    print("  Set one in .env or environment variable, or enter one now.")
+    key = input("  Enter your OpenAI API key [skip]: ").strip()
+    if key and key.lower() != "skip":
+        # Save to .env
+        env_path = Path(__file__).parent / ".env"
+        if env_path.exists():
+            content = env_path.read_text()
+            if not content.endswith("\n"):
+                content += "\n"
+            content += f"OPENAI_API_KEY={key}\n"
+        else:
+            content = f"OPENAI_API_KEY={key}\n"
+        env_path.write_text(content)
+        print("  Saved to .env — you won't be asked again.")
+        try:
+            result = _infer_with_openai(prompt, key)
+            if result:
+                return result
+        except Exception as e:
+            print(f"  Warning: OpenAI speaker identification failed: {e}")
+
+    return {}
+
+
+def _infer_with_openai(prompt: str, api_key: str) -> dict:
+    """Call OpenAI GPT-5.4 for speaker identification."""
+    from openai import OpenAI
+
+    client = OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
+        model="gpt-5.4",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = response.choices[0].message.content.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+        text = text.strip()
+    return json.loads(text)
+
+
+def _infer_with_gemini(prompt: str, api_key: str) -> dict:
+    """Call Gemini Flash for speaker identification."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=prompt,
+    )
+    text = response.text.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+        text = text.strip()
+    return json.loads(text)
 
 
 def confirm_speakers(suggestions: dict, blocks: list[dict]) -> dict[str, str]:
