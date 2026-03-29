@@ -290,6 +290,55 @@ def test_speaker_name_replacement():
     print("  speaker_name_replacement: OK")
 
 
+def test_discover_audio_files():
+    """Test that discover_audio_files finds audio files and skips non-audio."""
+    from transcribe import discover_audio_files
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        # Create test files
+        (tmpdir / "interview1.wav").touch()
+        (tmpdir / "interview2.mp3").touch()
+        (tmpdir / "interview3.m4a").touch()
+        (tmpdir / "notes.txt").touch()
+        (tmpdir / ".DS_Store").touch()
+
+        files = discover_audio_files(tmpdir)
+        names = [f.name for f in files]
+        assert len(files) == 3, f"Expected 3 audio files, got {len(files)}: {names}"
+        assert "interview1.wav" in names
+        assert "interview2.mp3" in names
+        assert "interview3.m4a" in names
+        assert "notes.txt" not in names
+    print("  discover_audio_files: OK")
+
+
+def test_batch_skips_existing_transcripts():
+    """Test that batch mode skips files that already have transcripts."""
+    from transcribe import discover_audio_files
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_dir = Path(tmpdir) / "audio"
+        output_dir = Path(tmpdir) / "transcripts"
+        input_dir.mkdir()
+        output_dir.mkdir()
+
+        # Create audio files
+        (input_dir / "done.wav").touch()
+        (input_dir / "pending.wav").touch()
+
+        # Create existing transcript for "done"
+        (output_dir / "done.md").write_text("# already done")
+
+        all_files = discover_audio_files(input_dir)
+        to_process = [
+            f for f in all_files
+            if not (output_dir / f"{f.stem}.md").exists()
+        ]
+
+        assert len(to_process) == 1
+        assert to_process[0].name == "pending.wav"
+    print("  batch_skips_existing: OK")
+
+
 def test_parse_args_defaults():
     """Test that parse_args returns correct defaults."""
     from transcribe import parse_args
@@ -334,6 +383,8 @@ def main():
         test_confirm_speakers_skip,
         test_process_file_exists,
         test_speaker_name_replacement,
+        test_discover_audio_files,
+        test_batch_skips_existing_transcripts,
         test_parse_args_defaults,
         test_parse_args_with_flags,
         test_parse_args_with_files,

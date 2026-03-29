@@ -370,6 +370,14 @@ def format_markdown(
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
 
 
+def discover_audio_files(input_dir: Path) -> list[Path]:
+    """Find all audio files in the input directory, sorted by name."""
+    return [
+        f for f in sorted(input_dir.iterdir())
+        if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
+    ]
+
+
 def process_file(audio_path: str, output_dir: Path) -> Path:
     """Run the full transcription pipeline on a single audio file.
 
@@ -472,9 +480,35 @@ def main():
                 sys.exit(1)
             process_file(str(audio_file), args.output_dir)
     else:
-        print("Usage: uv run python transcribe.py [files...] [--input-dir DIR] [--output-dir DIR]")
-        print("  No files specified — batch mode coming in next task.")
-        sys.exit(1)
+        # Batch mode: process all audio files in input dir
+        if not args.input_dir.exists():
+            print(f"Error: Input directory not found: {args.input_dir}")
+            sys.exit(1)
+
+        all_files = discover_audio_files(args.input_dir)
+        if not all_files:
+            print(f"No audio files found in {args.input_dir}")
+            sys.exit(0)
+
+        # Skip files that already have transcripts
+        to_process = [
+            f for f in all_files
+            if not (args.output_dir / f"{f.stem}.md").exists()
+        ]
+
+        skipped = len(all_files) - len(to_process)
+        print(f"Found {len(all_files)} audio files, {skipped} already transcribed, {len(to_process)} to process.")
+        print()
+
+        if not to_process:
+            print("All files already transcribed. Nothing to do.")
+            sys.exit(0)
+
+        for i, audio_file in enumerate(to_process, 1):
+            print(f"\n[{i}/{len(to_process)}] {audio_file.name}")
+            process_file(str(audio_file), args.output_dir)
+
+        print(f"\nDone! Processed {len(to_process)} files.")
 
 
 if __name__ == "__main__":
