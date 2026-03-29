@@ -13,6 +13,7 @@ from transcribe import (
     assign_speakers,
     build_blocks,
     confirm_speakers,
+    discover_audio_files,
     fmt_duration,
     fmt_timestamp,
     format_markdown,
