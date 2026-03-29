@@ -1,5 +1,6 @@
 """Transcribe an audio file with speaker diarization to markdown."""
 
+import argparse
 import json
 import os
 import sys
@@ -420,26 +421,60 @@ def process_file(audio_path: str, output_dir: Path) -> Path:
     return output_path
 
 
+DEFAULT_INPUT_DIR = Path(
+    "/Users/jerrison/My Drive (jerrisonli@gmail.com)"
+    "/00. Top Folder/02. Recruiting/04-interviews-audio-transcripts"
+)
+DEFAULT_OUTPUT_DIR = Path(
+    "/Users/jerrison/My Drive (jerrisonli@gmail.com)"
+    "/00. Top Folder/04-obsidian-vaults/jerrison-personal-gdrive"
+    "/00-Recruiting/03-transcripts"
+)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Transcribe audio files with speaker diarization to markdown."
+    )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="Audio file(s) to transcribe. If omitted, processes all audio files in --input-dir.",
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=DEFAULT_INPUT_DIR,
+        help=f"Directory containing audio files (default: {DEFAULT_INPUT_DIR})",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Directory for output transcripts (default: {DEFAULT_OUTPUT_DIR})",
+    )
+    return parser.parse_args(argv)
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: uv run python transcribe.py <audio-file>")
-        print("Example: uv run python transcribe.py recording.wav")
+    args = parse_args()
+
+    if args.files:
+        # Single-file mode: process specific files
+        for file_path in args.files:
+            audio_file = Path(file_path)
+            if not audio_file.exists():
+                # Try looking in input dir
+                audio_file = args.input_dir / file_path
+            if not audio_file.exists():
+                print(f"Error: Audio file not found: {file_path}")
+                sys.exit(1)
+            process_file(str(audio_file), args.output_dir)
+    else:
+        print("Usage: uv run python transcribe.py [files...] [--input-dir DIR] [--output-dir DIR]")
+        print("  No files specified — batch mode coming in next task.")
         sys.exit(1)
-
-    input_path = sys.argv[1]
-    audio_dir = Path("00-unprocessed-audio-recordings")
-    output_dir = Path("01-transcripts")
-
-    # Resolve audio file path
-    audio_file = Path(input_path)
-    if not audio_file.exists():
-        audio_file = audio_dir / input_path
-    if not audio_file.exists():
-        print(f"Error: Audio file not found: {input_path}")
-        print(f"Place audio files in {audio_dir}/")
-        sys.exit(1)
-
-    process_file(str(audio_file), output_dir)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from transcribe import (
     format_markdown,
     infer_speaker_names,
     normalize_speaker_names,
+    parse_args,
     process_file,
 )
 
@@ -289,6 +290,33 @@ def test_speaker_name_replacement():
     print("  speaker_name_replacement: OK")
 
 
+def test_parse_args_defaults():
+    """Test that parse_args returns correct defaults."""
+    from transcribe import parse_args
+    args = parse_args([])
+    assert args.input_dir == Path("/Users/jerrison/My Drive (jerrisonli@gmail.com)/00. Top Folder/02. Recruiting/04-interviews-audio-transcripts")
+    assert args.output_dir == Path("/Users/jerrison/My Drive (jerrisonli@gmail.com)/00. Top Folder/04-obsidian-vaults/jerrison-personal-gdrive/00-Recruiting/03-transcripts")
+    assert args.files == []
+    print("  parse_args (defaults): OK")
+
+
+def test_parse_args_with_flags():
+    """Test that parse_args handles --input-dir and --output-dir."""
+    from transcribe import parse_args
+    args = parse_args(["--input-dir", "/tmp/in", "--output-dir", "/tmp/out"])
+    assert args.input_dir == Path("/tmp/in")
+    assert args.output_dir == Path("/tmp/out")
+    print("  parse_args (flags): OK")
+
+
+def test_parse_args_with_files():
+    """Test that parse_args handles positional file arguments."""
+    from transcribe import parse_args
+    args = parse_args(["file1.wav", "file2.wav"])
+    assert args.files == ["file1.wav", "file2.wav"]
+    print("  parse_args (files): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -306,6 +334,9 @@ def main():
         test_confirm_speakers_skip,
         test_process_file_exists,
         test_speaker_name_replacement,
+        test_parse_args_defaults,
+        test_parse_args_with_flags,
+        test_parse_args_with_files,
     ]
     failed = 0
     for test in tests:
