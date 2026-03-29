@@ -114,9 +114,17 @@ def test_format_markdown():
         num_speakers=2,
     )
 
-    assert "# Transcript: test.wav" in md
+    # Check YAML frontmatter
+    assert md.startswith("---\n")
+    assert "title: test" in md
+    assert "source_file: test.wav" in md
+    assert "duration: 15s" in md
+    assert "language: en" in md
+    assert "  - transcript" in md
+    assert "  - interview" in md
+    # Check body
+    assert "# test" in md
     assert "**Duration**: 15s" in md
-    assert "**Speakers**: 2" in md
     assert "Speaker 1" in md
     assert "Speaker 2" in md
     assert "Hello" in md
@@ -145,7 +153,7 @@ def test_file_io():
     try:
         content = tmp_path.read_text()
         assert content == md
-        assert len(content) > 100
+        assert len(content) > 200
         print(f"  file_io: OK ({len(content)} chars written/read)")
     finally:
         tmp_path.unlink()

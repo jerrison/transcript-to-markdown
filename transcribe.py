@@ -342,15 +342,36 @@ def format_markdown(
     duration: float,
     language: str,
     num_speakers: int,
+    speakers: list[str] | None = None,
 ) -> str:
-    """Format dialogue blocks as markdown."""
+    """Format dialogue blocks as Obsidian-friendly markdown with YAML frontmatter."""
+    stem = Path(filename).stem
+    speaker_list = speakers or sorted(set(b["speaker"] for b in blocks))
+
+    # YAML frontmatter
     lines = [
-        f"# Transcript: {filename}",
+        "---",
+        f"title: {stem}",
+        f"date: {date.today().isoformat()}",
+        f"source_file: {filename}",
+        f"duration: {fmt_duration(duration)}",
+        f"language: {language}",
+        "speakers:",
+    ]
+    for s in speaker_list:
+        lines.append(f"  - {s}")
+    lines += [
+        "tags:",
+        "  - transcript",
+        "  - interview",
+        "---",
         "",
-        f"- **Date**: {date.today().isoformat()}",
+        f"# {stem}",
+        "",
+        "## Metadata",
         f"- **Duration**: {fmt_duration(duration)}",
         f"- **Language**: {language}",
-        f"- **Speakers**: {num_speakers}",
+        f"- **Speakers**: {', '.join(speaker_list)}",
         "",
         "---",
         "",
@@ -410,6 +431,9 @@ def process_file(audio_path: str, output_dir: Path) -> Path:
     for block in blocks:
         block["speaker"] = speaker_name_map.get(block["speaker"], block["speaker"])
 
+    # Collect final speaker names for metadata
+    final_speakers = sorted(set(b["speaker"] for b in blocks))
+
     # Step 6: Format and save
     markdown = format_markdown(
         filename=filename,
@@ -417,6 +441,7 @@ def process_file(audio_path: str, output_dir: Path) -> Path:
         duration=info.duration,
         language=info.language,
         num_speakers=len(unique_speakers),
+        speakers=final_speakers,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
