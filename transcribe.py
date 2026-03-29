@@ -1,5 +1,6 @@
 """Transcribe an audio file with speaker diarization to markdown."""
 
+import json
 import os
 import sys
 from datetime import date
@@ -179,6 +180,161 @@ def build_blocks(words: list[dict], pause_threshold: float = 1.5) -> list[dict]:
     return blocks
 
 
+def load_google_api_key() -> str | None:
+    """Load Google API key from environment or .env file.
+
+    If not found, prompts the user to enter it and saves to .env for future runs.
+    Returns None only if the user declines to provide a key.
+    """
+    token = os.environ.get("GOOGLE_API_KEY")
+    if token:
+        return token
+
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if line.startswith("GOOGLE_API_KEY="):
+                return line.split("=", 1)[1].strip()
+
+    # Prompt user for key
+    print("\n  No GOOGLE_API_KEY found (needed for speaker identification).")
+    print("  Get one at: https://aistudio.google.com/apikey")
+    key = input("  Enter your Gemini API key [skip]: ").strip()
+    if not key or key.lower() == "skip":
+        return None
+
+    # Save to .env
+    if env_path.exists():
+        content = env_path.read_text()
+        if not content.endswith("\n"):
+            content += "\n"
+        content += f"GOOGLE_API_KEY={key}\n"
+    else:
+        content = f"GOOGLE_API_KEY={key}\n"
+    env_path.write_text(content)
+    print("  Saved to .env — you won't be asked again.")
+    return key
+
+
+def infer_speaker_names(blocks: list[dict]) -> dict:
+    """Use Gemini Flash to guess speaker names from transcript context.
+
+    Returns a dict mapping speaker labels to suggestion dicts:
+    {"Speaker 1": {"likely_name": "Sarah", "confidence": "high", "role": "...", "summary": "..."}}
+
+    Returns empty dict if no API key or on failure.
+    """
+    api_key = load_google_api_key()
+    if not api_key:
+        return {}
+
+    # Build a transcript snippet from first ~30 blocks
+    snippet_blocks = blocks[:30]
+    snippet_lines = []
+    for b in snippet_blocks:
+        snippet_lines.append(f"{b['speaker']}: {b['text']}")
+    snippet = "\n".join(snippet_lines)
+
+    speakers = sorted(set(b["speaker"] for b in blocks))
+
+    prompt = f"""Analyze this transcript and identify the real names of each speaker.
+Return ONLY valid JSON (no markdown fencing) with this structure:
+{{
+  "Speaker 1": {{
+    "likely_name": "First Last" or null if unknown,
+    "confidence": "high" | "medium" | "low",
+    "role": "brief role description",
+    "summary": "one sentence about what they said"
+  }},
+  ...
+}}
+
+Speakers to identify: {', '.join(speakers)}
+
+Transcript:
+{snippet}"""
+
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt,
+        )
+        text = response.text.strip()
+        # Strip markdown code fences if present
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1]
+            if text.endswith("```"):
+                text = text[: text.rfind("```")]
+            text = text.strip()
+        return json.loads(text)
+    except Exception as e:
+        print(f"  Warning: LLM speaker identification failed: {e}")
+        return {}
+
+
+def confirm_speakers(suggestions: dict, blocks: list[dict]) -> dict[str, str]:
+    """Interactive CLI flow to confirm or correct speaker name suggestions.
+
+    Returns a mapping of original labels to confirmed names, e.g.:
+    {"Speaker 1": "Sarah Chen", "Speaker 2": "Alex Kim"}
+    """
+    speakers = sorted(set(b["speaker"] for b in blocks))
+    name_map = {}
+
+    for i, speaker in enumerate(speakers, 1):
+        info = suggestions.get(speaker, {})
+        likely_name = info.get("likely_name")
+        role = info.get("role", "")
+        summary = info.get("summary", "")
+
+        print(f"\n  Speaker {i} of {len(speakers)}:")
+
+        if role:
+            print(f"    Role: {role}")
+        if summary:
+            print(f"    Said: {summary}")
+
+        if likely_name:
+            print(f'    Suggested name: {likely_name}')
+            answer = input(f'\n    Accept "{likely_name}"? [Y/name]: ').strip()
+            if answer == "" or answer.lower() == "y":
+                name_map[speaker] = likely_name
+                print(f"    \u2713 {speaker} \u2192 {likely_name}")
+            elif answer.lower() == "skip":
+                print(f"    - Keeping \"{speaker}\"")
+            else:
+                name_map[speaker] = answer
+                print(f"    \u2713 {speaker} \u2192 {answer}")
+        else:
+            answer = input(f"    Name for {speaker}? [skip]: ").strip()
+            if answer and answer.lower() != "skip":
+                name_map[speaker] = answer
+                print(f"    \u2713 {speaker} \u2192 {answer}")
+            else:
+                print(f"    - Keeping \"{speaker}\"")
+
+    return name_map
+
+
+def identify_speakers(blocks: list[dict]) -> dict[str, str]:
+    """Infer speaker names via LLM, then confirm interactively.
+
+    Returns a mapping of original speaker labels to confirmed names.
+    """
+    print("\nIdentifying speakers...")
+    suggestions = infer_speaker_names(blocks)
+
+    if suggestions:
+        print("  LLM provided speaker suggestions.")
+    else:
+        print("  No LLM suggestions available (no API key or call failed).")
+
+    return confirm_speakers(suggestions, blocks)
+
+
 def format_markdown(
     filename: str,
     blocks: list[dict],
@@ -210,27 +366,15 @@ def format_markdown(
     return "\n".join(lines)
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: uv run python transcribe.py <audio-file>")
-        print("Example: uv run python transcribe.py recording.wav")
-        sys.exit(1)
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
 
-    input_path = sys.argv[1]
-    audio_dir = Path("00-unprocessed-audio-recordings")
-    output_dir = Path("01-transcripts")
 
-    # Resolve audio file path
-    audio_file = Path(input_path)
-    if not audio_file.exists():
-        # Try looking in the audio directory
-        audio_file = audio_dir / input_path
-    if not audio_file.exists():
-        print(f"Error: Audio file not found: {input_path}")
-        print(f"Place audio files in {audio_dir}/")
-        sys.exit(1)
+def process_file(audio_path: str, output_dir: Path) -> Path:
+    """Run the full transcription pipeline on a single audio file.
 
-    audio_path = str(audio_file)
+    Returns the path to the written markdown transcript.
+    """
+    audio_file = Path(audio_path)
     filename = audio_file.name
 
     print(f"Processing: {filename}")
@@ -252,7 +396,12 @@ def main():
     blocks = build_blocks(words)
     print(f"  Built {len(blocks)} dialogue blocks")
 
-    # Step 5: Format and save
+    # Step 5: Identify speakers
+    speaker_name_map = identify_speakers(blocks)
+    for block in blocks:
+        block["speaker"] = speaker_name_map.get(block["speaker"], block["speaker"])
+
+    # Step 6: Format and save
     markdown = format_markdown(
         filename=filename,
         blocks=blocks,
@@ -261,13 +410,36 @@ def main():
         num_speakers=len(unique_speakers),
     )
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     stem = audio_file.stem
     output_path = output_dir / f"{stem}.md"
     output_path.write_text(markdown)
 
     print("=" * 50)
     print(f"Saved transcript to {output_path}")
+    return output_path
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: uv run python transcribe.py <audio-file>")
+        print("Example: uv run python transcribe.py recording.wav")
+        sys.exit(1)
+
+    input_path = sys.argv[1]
+    audio_dir = Path("00-unprocessed-audio-recordings")
+    output_dir = Path("01-transcripts")
+
+    # Resolve audio file path
+    audio_file = Path(input_path)
+    if not audio_file.exists():
+        audio_file = audio_dir / input_path
+    if not audio_file.exists():
+        print(f"Error: Audio file not found: {input_path}")
+        print(f"Place audio files in {audio_dir}/")
+        sys.exit(1)
+
+    process_file(str(audio_file), output_dir)
 
 
 if __name__ == "__main__":

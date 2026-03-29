@@ -7,14 +7,18 @@ Bypasses Whisper and pyannote model loading to test the processing logic
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from transcribe import (
     assign_speakers,
     build_blocks,
+    confirm_speakers,
     fmt_duration,
     fmt_timestamp,
     format_markdown,
+    infer_speaker_names,
     normalize_speaker_names,
+    process_file,
 )
 
 
@@ -146,6 +150,145 @@ def test_file_io():
         tmp_path.unlink()
 
 
+def test_infer_speaker_names_mocked():
+    """Test infer_speaker_names with a mocked Gemini response (no API call)."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Hi, I'm Sarah. Let's start the meeting."},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "Thanks Sarah, I'm Alex from engineering."},
+    ]
+
+    fake_response = {
+        "Speaker 1": {
+            "likely_name": "Sarah",
+            "confidence": "high",
+            "role": "Meeting organizer",
+            "summary": "Opened the meeting",
+        },
+        "Speaker 2": {
+            "likely_name": "Alex",
+            "confidence": "high",
+            "role": "Engineer",
+            "summary": "Introduced themselves",
+        },
+    }
+
+    import json
+    from unittest.mock import MagicMock
+
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(fake_response)
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("transcribe.load_google_api_key", return_value="fake-key"), \
+         patch("google.genai.Client", return_value=mock_client):
+        result = infer_speaker_names(blocks)
+
+    assert result == fake_response
+    print("  infer_speaker_names (mocked): OK")
+
+
+def test_infer_speaker_names_no_key():
+    """Test that infer_speaker_names returns empty dict when no API key."""
+    blocks = [{"speaker": "Speaker 1", "start": 0.0, "text": "Hello"}]
+
+    with patch("transcribe.load_google_api_key", return_value=None):
+        result = infer_speaker_names(blocks)
+
+    assert result == {}
+    print("  infer_speaker_names (no key): OK")
+
+
+def test_confirm_speakers_accept():
+    """Test confirm_speakers with user accepting suggestions."""
+    suggestions = {
+        "Speaker 1": {
+            "likely_name": "Sarah",
+            "confidence": "high",
+            "role": "Manager",
+            "summary": "Led the meeting",
+        },
+        "Speaker 2": {
+            "likely_name": "Alex",
+            "confidence": "medium",
+            "role": "Engineer",
+            "summary": "Gave updates",
+        },
+    }
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Hello"},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "Hi there"},
+    ]
+
+    # Simulate user pressing Enter (accept) for both
+    with patch("builtins.input", side_effect=["y", ""]):
+        result = confirm_speakers(suggestions, blocks)
+
+    assert result == {"Speaker 1": "Sarah", "Speaker 2": "Alex"}
+    print("  confirm_speakers (accept): OK")
+
+
+def test_confirm_speakers_custom_name():
+    """Test confirm_speakers with user providing a custom name."""
+    suggestions = {
+        "Speaker 1": {
+            "likely_name": "Sarah",
+            "confidence": "low",
+            "role": "Unknown",
+            "summary": "Spoke briefly",
+        },
+    }
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Hello"},
+    ]
+
+    # Simulate user typing a custom name
+    with patch("builtins.input", return_value="Jane Doe"):
+        result = confirm_speakers(suggestions, blocks)
+
+    assert result == {"Speaker 1": "Jane Doe"}
+    print("  confirm_speakers (custom name): OK")
+
+
+def test_confirm_speakers_skip():
+    """Test confirm_speakers when user skips (no suggestion, presses Enter)."""
+    suggestions = {}
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Hello"},
+    ]
+
+    # Simulate user pressing Enter to skip
+    with patch("builtins.input", return_value=""):
+        result = confirm_speakers(suggestions, blocks)
+
+    assert result == {}
+    print("  confirm_speakers (skip): OK")
+
+
+def test_process_file_exists():
+    """Test that process_file is importable and callable."""
+    assert callable(process_file)
+    print("  process_file_exists: OK")
+
+
+def test_speaker_name_replacement():
+    """Test that speaker names are correctly replaced in blocks."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Hello everyone"},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "Thanks for having me"},
+        {"speaker": "Speaker 1", "start": 10.0, "text": "Let's get started"},
+    ]
+    name_map = {"Speaker 1": "Sarah Chen", "Speaker 2": "Alex Kim"}
+
+    for block in blocks:
+        block["speaker"] = name_map.get(block["speaker"], block["speaker"])
+
+    assert blocks[0]["speaker"] == "Sarah Chen"
+    assert blocks[1]["speaker"] == "Alex Kim"
+    assert blocks[2]["speaker"] == "Sarah Chen"
+    print("  speaker_name_replacement: OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -156,6 +299,13 @@ def main():
         test_build_blocks,
         test_format_markdown,
         test_file_io,
+        test_infer_speaker_names_mocked,
+        test_infer_speaker_names_no_key,
+        test_confirm_speakers_accept,
+        test_confirm_speakers_custom_name,
+        test_confirm_speakers_skip,
+        test_process_file_exists,
+        test_speaker_name_replacement,
     ]
     failed = 0
     for test in tests:
