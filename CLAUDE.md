@@ -16,7 +16,7 @@ After making any code changes to `transcribe.py`, always run the smoke test befo
 uv run python smoke_test.py
 ```
 
-All 20 tests must pass. The smoke test covers: `fmt_timestamp`, `fmt_duration`, `assign_speakers`, `normalize_speaker_names`, `build_blocks`, `format_markdown` (with YAML frontmatter), file I/O, `infer_speaker_names` (mocked OpenAI + no-key fallback + Gemini fallback), `confirm_speakers` (accept/custom/skip), speaker name replacement, `process_file` importability, `discover_audio_files`, batch skip logic, and `parse_args` (defaults/flags/files) — using synthetic data so it runs in under a second with no model downloads.
+All 21 tests must pass. The smoke test covers: `fmt_timestamp`, `fmt_duration`, `assign_speakers`, `normalize_speaker_names`, `build_blocks`, `format_markdown` (with YAML frontmatter), file I/O, `infer_speaker_names` (mocked OpenAI + no-key fallback + Gemini fallback), `confirm_speakers` (accept/custom/skip), speaker name replacement, `process_file` importability, `discover_audio_files`, batch skip logic, and `parse_args` (defaults/flags/files) — using synthetic data so it runs in under a second with no model downloads.
 
 If the change involves model loading, diarization, or transcription logic that the smoke test can't cover, also do a quick manual test with a real audio file:
 

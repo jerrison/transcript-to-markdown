@@ -47,7 +47,7 @@ def transcribe(audio_path: str) -> list[dict]:
     print("Transcribing audio with mlx-whisper (Apple Silicon GPU)...")
     result = mlx_whisper.transcribe(
         audio_path,
-        path_or_hf_repo="mlx-community/whisper-large-v3-turbo",
+        path_or_hf_repo="mlx-community/whisper-large-v3",
         word_timestamps=True,
     )
 
@@ -131,7 +131,11 @@ def diarize(audio_path: str) -> list[dict]:
 
 
 def assign_speakers(words: list[dict], speaker_segments: list[dict]) -> list[dict]:
-    """Assign a speaker to each word by maximum timestamp overlap."""
+    """Assign a speaker to each word by maximum timestamp overlap.
+
+    Falls back to nearest speaker segment when no overlap exists,
+    eliminating "Unknown" assignments from diarization gaps.
+    """
     for word in words:
         best_speaker = "Unknown"
         best_overlap = 0.0
@@ -144,6 +148,15 @@ def assign_speakers(words: list[dict], speaker_segments: list[dict]) -> list[dic
             if overlap > best_overlap:
                 best_overlap = overlap
                 best_speaker = seg["speaker"]
+
+        # Fall back to nearest segment if no overlap found
+        if best_overlap == 0.0 and speaker_segments:
+            word_mid = (word["start"] + word["end"]) / 2
+            nearest = min(
+                speaker_segments,
+                key=lambda seg: min(abs(seg["start"] - word_mid), abs(seg["end"] - word_mid)),
+            )
+            best_speaker = nearest["speaker"]
 
         word["speaker"] = best_speaker
 

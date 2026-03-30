@@ -71,7 +71,23 @@ def test_assign_speakers():
     assert result[0]["speaker"] == "SPEAKER_00"
     assert result[6]["speaker"] == "SPEAKER_01"
     assert result[11]["speaker"] == "SPEAKER_00"
+    assert all(w["speaker"] != "Unknown" for w in result), "No words should be Unknown"
     print("  assign_speakers: OK")
+
+
+def test_assign_speakers_nearest_fallback():
+    """Test that words in gaps between segments get assigned to nearest speaker."""
+    # Word at 5.5s falls in gap between segments (0-5s and 6-10s)
+    words = [{"word": "um", "start": 5.2, "end": 5.8}]
+    segments = [
+        {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_00"},
+        {"start": 6.0, "end": 10.0, "speaker": "SPEAKER_01"},
+    ]
+    result = assign_speakers(words, segments)
+    # Midpoint 5.5 is closer to SPEAKER_00's end (5.0) than SPEAKER_01's start (6.0)
+    assert result[0]["speaker"] == "SPEAKER_00"
+    assert result[0]["speaker"] != "Unknown"
+    print("  assign_speakers (nearest fallback): OK")
 
 
 def test_normalize_speaker_names():
@@ -419,6 +435,7 @@ def main():
         test_fmt_timestamp,
         test_fmt_duration,
         test_assign_speakers,
+        test_assign_speakers_nearest_fallback,
         test_normalize_speaker_names,
         test_build_blocks,
         test_format_markdown,
