@@ -631,11 +631,20 @@ def main():
             print("All files already transcribed. Nothing to do.")
             sys.exit(0)
 
+        failed = []
         for i, audio_file in enumerate(to_process, 1):
             print(f"\n[{i}/{len(to_process)}] {audio_file.name}")
-            process_file(str(audio_file), args.output_dir)
+            try:
+                process_file(str(audio_file), args.output_dir)
+            except Exception as e:
+                print(f"\n  ERROR: Failed to process {audio_file.name}: {e}")
+                failed.append((audio_file.name, str(e)))
 
-        print(f"\nDone! Processed {len(to_process)} files.")
+        print(f"\nDone! Processed {len(to_process) - len(failed)}/{len(to_process)} files.")
+        if failed:
+            print(f"\nFailed files ({len(failed)}):")
+            for name, error in failed:
+                print(f"  - {name}: {error}")
 
 
 if __name__ == "__main__":
