@@ -45,13 +45,22 @@ class TranscriptionInfo:
         self.duration = duration
 
 
-def transcribe(audio_path: str) -> list[dict]:
+def transcribe(audio_path: str, speech_segments: list[dict] | None = None) -> list[dict]:
     """Run mlx-whisper on the audio file, return list of words with timestamps."""
     import mlx_whisper
 
+    # If VAD segments provided, transcribe only speech portions
+    trimmed_path = None
+    offset_map = None
+    if speech_segments:
+        trimmed_path, offset_map = prepare_vad_audio(audio_path, speech_segments)
+        audio_to_transcribe = trimmed_path
+    else:
+        audio_to_transcribe = audio_path
+
     print("Transcribing audio with mlx-whisper (Apple Silicon GPU)...")
     result = mlx_whisper.transcribe(
-        audio_path,
+        audio_to_transcribe,
         path_or_hf_repo="mlx-community/whisper-large-v3-mlx",
         word_timestamps=True,
     )
@@ -71,6 +80,17 @@ def transcribe(audio_path: str) -> list[dict]:
         duration = words[-1]["end"]
     elif result.get("segments"):
         duration = result["segments"][-1]["end"]
+
+    # Remap timestamps if we used trimmed audio
+    if offset_map:
+        words = remap_timestamps(words, offset_map)
+        # Duration should reflect original audio length, not trimmed
+        if speech_segments:
+            duration = max(seg["end"] for seg in speech_segments)
+
+    # Clean up temp file
+    if trimmed_path:
+        Path(trimmed_path).unlink(missing_ok=True)
 
     info = TranscriptionInfo(
         language=result.get("language", "unknown"),
@@ -820,7 +840,8 @@ def discover_audio_files(input_dir: Path) -> list[Path]:
     ]
 
 
-def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -> Path:
+def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None,
+                 skip_speakers: bool = False, auto_speakers: bool = False) -> Path:
     """Run the full transcription pipeline on a single audio file.
 
     Returns the path to the written markdown transcript.
@@ -831,9 +852,12 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
     print(f"Processing: {filename}")
     print("=" * 50)
 
+    # Step 0: VAD — detect speech segments
+    speech_segments = detect_speech_segments(audio_path)
+
     # Steps 1 & 2: Transcribe and diarize in parallel
     with ThreadPoolExecutor(max_workers=2) as executor:
-        transcribe_future = executor.submit(transcribe, audio_path)
+        transcribe_future = executor.submit(transcribe, audio_path, speech_segments)
         diarize_future = executor.submit(diarize, audio_path, diarization_pipeline)
 
     words, info = transcribe_future.result()
@@ -850,23 +874,43 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
     blocks = build_blocks(words)
     print(f"  Built {len(blocks)} dialogue blocks")
 
-    # Step 5: Polish transcript via LLM
+    # Step 5: Filter hallucinations
+    blocks = filter_hallucinations(blocks)
+
+    # Step 6: Merge filler blocks
+    blocks = merge_filler_blocks(blocks)
+
+    # Step 7: Polish transcript via LLM
     blocks = polish_transcript(blocks)
 
-    # Step 6: Identify speakers
-    speaker_name_map = identify_speakers(blocks)
+    # Step 8: Identify speakers (conditional)
+    if skip_speakers:
+        speaker_name_map = {}
+    elif auto_speakers:
+        print("\nIdentifying speakers (auto mode)...")
+        suggestions = infer_speaker_names(blocks)
+        speaker_name_map = {}
+        for speaker, info_dict in suggestions.items():
+            name = info_dict.get("likely_name")
+            if name:
+                speaker_name_map[speaker] = name
+        if speaker_name_map:
+            print(f"  Auto-assigned {len(speaker_name_map)} speaker names")
+    else:
+        speaker_name_map = identify_speakers(blocks)
+
     for block in blocks:
         block["speaker"] = speaker_name_map.get(block["speaker"], block["speaker"])
 
     # Collect final speaker names for metadata
     final_speakers = sorted(set(b["speaker"] for b in blocks))
 
-    # Step 7: Generate summary
+    # Step 9: Generate summary
     summary = generate_summary(blocks)
     if summary:
         print("  Generated interview summary")
 
-    # Step 8: Format and save
+    # Step 10: Format and save
     markdown = format_markdown(
         filename=filename,
         blocks=blocks,
