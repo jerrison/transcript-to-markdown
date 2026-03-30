@@ -561,6 +561,20 @@ def test_filter_hallucinations_preserves_real():
     print("  filter_hallucinations (preserves real): OK")
 
 
+def test_filter_hallucinations_consecutive():
+    """Test consecutive identical blocks (heuristic 3) in isolation."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Mm-hmm."},
+        {"speaker": "Speaker 2", "start": 1.0, "text": "Mm-hmm."},
+        {"speaker": "Speaker 1", "start": 2.0, "text": "Mm-hmm."},
+        {"speaker": "Speaker 1", "start": 10.0, "text": "That's a great point about the market."},
+    ]
+    result = filter_hallucinations(blocks)
+    assert len(result) == 1, f"Expected 1 block, got {len(result)}"
+    assert result[0]["text"] == "That's a great point about the market."
+    print("  filter_hallucinations (consecutive): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -592,6 +606,7 @@ def main():
         test_format_markdown_with_summary,
         test_filter_hallucinations,
         test_filter_hallucinations_preserves_real,
+        test_filter_hallucinations_consecutive,
     ]
     failed = 0
     for test in tests:

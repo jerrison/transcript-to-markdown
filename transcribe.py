@@ -245,7 +245,6 @@ def filter_hallucinations(blocks: list[dict]) -> list[dict]:
 
     for i, block in enumerate(blocks):
         text = block["text"].strip()
-        text_lower = text.lower().rstrip(".")
 
         # Heuristic 1: Known hallucination phrases (standalone)
         if text.lower() in KNOWN_HALLUCINATIONS:
