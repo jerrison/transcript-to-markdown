@@ -991,6 +991,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main():
     args = parse_args()
 
+    if args.name_speakers:
+        # Standalone mode: rename speakers in existing transcripts
+        name_speakers_in_files(args.output_dir)
+        return
+
     if args.files:
         # Single-file mode: process specific files
         for file_path in args.files:
@@ -1001,9 +1006,16 @@ def main():
             if not audio_file.exists():
                 print(f"Error: Audio file not found: {file_path}")
                 sys.exit(1)
-            process_file(str(audio_file), args.output_dir)
+            process_file(
+                str(audio_file), args.output_dir,
+                skip_speakers=args.skip_speakers,
+                auto_speakers=args.auto,
+            )
     else:
         # Batch mode: process all audio files in input dir
+        # Default to skip-speakers in batch mode
+        skip_speakers = True if not args.auto else False
+
         if not args.input_dir.exists():
             print(f"Error: Input directory not found: {args.input_dir}")
             sys.exit(1)
@@ -1048,7 +1060,12 @@ def main():
 
             file_start = time.time()
             try:
-                process_file(str(audio_file), args.output_dir, diarization_pipeline=diarization_pipeline)
+                process_file(
+                    str(audio_file), args.output_dir,
+                    diarization_pipeline=diarization_pipeline,
+                    skip_speakers=skip_speakers,
+                    auto_speakers=args.auto,
+                )
             except Exception as e:
                 print(f"\n  ERROR: Failed to process {audio_file.name}: {e}")
                 failed.append((audio_file.name, str(e)))
