@@ -20,6 +20,7 @@ from transcribe import (
     infer_speaker_names,
     normalize_speaker_names,
     parse_args,
+    polish_transcript,
     process_file,
 )
 
@@ -429,6 +430,47 @@ def test_parse_args_with_files():
     print("  parse_args (files): OK")
 
 
+def test_polish_transcript_mocked():
+    """Test polish_transcript with mocked LLM response."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Welcome to Gogle"},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "Thanks for having me"},
+    ]
+
+    import json
+    from unittest.mock import MagicMock
+
+    corrections = [{"index": 0, "text": "Welcome to Google"}]
+    mock_message = MagicMock()
+    mock_message.content = json.dumps(corrections)
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch("transcribe.load_openai_api_key", return_value="fake-key"), \
+         patch("openai.OpenAI", return_value=mock_client):
+        result = polish_transcript(blocks)
+
+    assert result[0]["text"] == "Welcome to Google"
+    assert result[1]["text"] == "Thanks for having me"
+    print("  polish_transcript (mocked): OK")
+
+
+def test_polish_transcript_no_key():
+    """Test polish_transcript returns original blocks when no API key."""
+    blocks = [{"speaker": "Speaker 1", "start": 0.0, "text": "Hello"}]
+
+    with patch("transcribe.load_openai_api_key", return_value=None), \
+         patch("transcribe.load_google_api_key", return_value=None):
+        result = polish_transcript(blocks)
+
+    assert result[0]["text"] == "Hello"
+    print("  polish_transcript (no key): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -453,6 +495,8 @@ def main():
         test_parse_args_defaults,
         test_parse_args_with_flags,
         test_parse_args_with_files,
+        test_polish_transcript_mocked,
+        test_polish_transcript_no_key,
     ]
     failed = 0
     for test in tests:

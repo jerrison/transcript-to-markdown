@@ -373,6 +373,55 @@ def _infer_with_gemini(prompt: str, api_key: str) -> dict:
     return json.loads(text)
 
 
+def polish_transcript(blocks: list[dict]) -> list[dict]:
+    """Use LLM to fix transcription errors in block text.
+
+    Fixes garbled names, technical terms, and obvious mistakes.
+    Returns blocks with corrected text. Falls back to original on failure.
+    """
+    openai_key = load_openai_api_key()
+    if not openai_key:
+        google_key = load_google_api_key()
+        if not google_key:
+            return blocks
+
+    # Build transcript for correction
+    lines = []
+    for i, b in enumerate(blocks):
+        lines.append(f"[{i}] {b['text']}")
+    transcript = "\n".join(lines)
+
+    prompt = f"""Fix transcription errors in this interview transcript. Fix:
+- Garbled or misspelled proper nouns (people, companies, products)
+- Technical terms that were misheard
+- Obviously wrong words from speech-to-text errors
+
+Return ONLY valid JSON: a list of corrections as objects with "index" (block number) and "text" (corrected text).
+If a block needs no changes, omit it. Return [] if nothing needs fixing.
+
+Transcript:
+{transcript}"""
+
+    try:
+        if openai_key:
+            corrections = _infer_with_openai(prompt, openai_key)
+        else:
+            corrections = _infer_with_gemini(prompt, google_key)
+
+        if isinstance(corrections, list):
+            for fix in corrections:
+                idx = fix.get("index")
+                text = fix.get("text")
+                if idx is not None and text and 0 <= idx < len(blocks):
+                    blocks[idx]["text"] = text
+            if corrections:
+                print(f"  Polished {len(corrections)} blocks via LLM")
+    except Exception as e:
+        print(f"  Warning: LLM transcript polishing failed: {e}")
+
+    return blocks
+
+
 def confirm_speakers(suggestions: dict, blocks: list[dict]) -> dict[str, str]:
     """Interactive CLI flow to confirm or correct speaker name suggestions.
 
@@ -541,7 +590,10 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
     blocks = build_blocks(words)
     print(f"  Built {len(blocks)} dialogue blocks")
 
-    # Step 5: Identify speakers
+    # Step 5: Polish transcript via LLM
+    blocks = polish_transcript(blocks)
+
+    # Step 6: Identify speakers
     speaker_name_map = identify_speakers(blocks)
     for block in blocks:
         block["speaker"] = speaker_name_map.get(block["speaker"], block["speaker"])
@@ -549,7 +601,7 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
     # Collect final speaker names for metadata
     final_speakers = sorted(set(b["speaker"] for b in blocks))
 
-    # Step 6: Format and save
+    # Step 7: Format and save
     markdown = format_markdown(
         filename=filename,
         blocks=blocks,
