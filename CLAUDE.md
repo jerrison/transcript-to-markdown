@@ -1,6 +1,6 @@
 # Transcript-to-Markdown
 
-Audio transcription pipeline: Whisper (speech-to-text) + pyannote (speaker diarization) + OpenAI GPT-5.4 / Gemini Flash (speaker identification) → markdown.
+Audio transcription pipeline: mlx-whisper (speech-to-text, Apple Silicon GPU) + pyannote (speaker diarization) + OpenAI GPT-5.4 / Gemini Flash (speaker identification) → markdown.
 
 ## Project structure
 
@@ -28,7 +28,7 @@ Clean up any test artifacts (temp files, test transcripts) after verification.
 
 ## Key details
 
-- Whisper runs on CPU via faster-whisper (CTranslate2 backend, no MPS support)
+- Whisper runs on Apple Silicon GPU via mlx-whisper (MLX backend, ~1.8x faster than whisper-cpp)
 - pyannote diarization uses MPS on Apple Silicon when available, falls back to CPU
 - pyannote's `SpeakerDiarization` pipeline returns `DiarizeOutput` dataclass (not raw `Annotation`) — use `output.speaker_diarization` to get the `Annotation`
 - HF_TOKEN is loaded from `.env` or environment variable

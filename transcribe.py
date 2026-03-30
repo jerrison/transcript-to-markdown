@@ -32,25 +32,45 @@ def fmt_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
+class TranscriptionInfo:
+    """Minimal info object matching the fields used from faster-whisper's TranscriptionInfo."""
+
+    def __init__(self, language: str, duration: float):
+        self.language = language
+        self.duration = duration
+
+
 def transcribe(audio_path: str) -> list[dict]:
-    """Run faster-whisper on the audio file, return list of words with timestamps."""
-    from faster_whisper import WhisperModel
+    """Run mlx-whisper on the audio file, return list of words with timestamps."""
+    import mlx_whisper
 
-    print("Loading Whisper large-v3-turbo model...")
-    model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
-
-    print("Transcribing audio...")
-    segments, info = model.transcribe(audio_path, word_timestamps=True)
+    print("Transcribing audio with mlx-whisper (Apple Silicon GPU)...")
+    result = mlx_whisper.transcribe(
+        audio_path,
+        path_or_hf_repo="mlx-community/whisper-large-v3-turbo",
+        word_timestamps=True,
+    )
 
     words = []
-    for segment in segments:
-        if segment.words:
-            for w in segment.words:
-                words.append({
-                    "word": w.word,
-                    "start": w.start,
-                    "end": w.end,
-                })
+    for segment in result.get("segments", []):
+        for w in segment.get("words", []):
+            words.append({
+                "word": w["word"],
+                "start": w["start"],
+                "end": w["end"],
+            })
+
+    # Calculate duration from last word or last segment
+    duration = 0.0
+    if words:
+        duration = words[-1]["end"]
+    elif result.get("segments"):
+        duration = result["segments"][-1]["end"]
+
+    info = TranscriptionInfo(
+        language=result.get("language", "unknown"),
+        duration=duration,
+    )
 
     return words, info
 
