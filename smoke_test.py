@@ -21,6 +21,7 @@ from transcribe import (
     format_markdown,
     generate_summary,
     infer_speaker_names,
+    merge_filler_blocks,
     normalize_speaker_names,
     parse_args,
     polish_transcript,
@@ -604,6 +605,46 @@ def test_detect_speech_segments_mocked():
     print("  detect_speech_segments (mocked): OK")
 
 
+def test_merge_filler_blocks():
+    """Test that filler blocks are merged into the previous block."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "So I started at Lyft."},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "Yeah."},
+        {"speaker": "Speaker 1", "start": 6.0, "text": "And then I moved to Kite."},
+    ]
+    result = merge_filler_blocks(blocks)
+    assert len(result) == 2, f"Expected 2 blocks, got {len(result)}"
+    assert "Yeah." in result[0]["text"]
+    assert result[0]["text"].startswith("So I started at Lyft.")
+    assert result[1]["text"] == "And then I moved to Kite."
+    print("  merge_filler_blocks: OK")
+
+
+def test_merge_filler_blocks_first():
+    """Test that filler as first block merges into the next block."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Um."},
+        {"speaker": "Speaker 1", "start": 1.0, "text": "So I started at Lyft."},
+    ]
+    result = merge_filler_blocks(blocks)
+    assert len(result) == 1, f"Expected 1 block, got {len(result)}"
+    assert "Um." in result[0]["text"]
+    assert "Lyft" in result[0]["text"]
+    print("  merge_filler_blocks (first block): OK")
+
+
+def test_merge_filler_preserves_substantive():
+    """Test that short non-filler blocks are kept."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "What do you think?"},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "That's correct."},
+        {"speaker": "Speaker 1", "start": 10.0, "text": "Great, let's continue."},
+    ]
+    result = merge_filler_blocks(blocks)
+    assert len(result) == 3, f"Expected 3 blocks, got {len(result)}"
+    print("  merge_filler_preserves_substantive: OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -637,6 +678,9 @@ def main():
         test_filter_hallucinations_preserves_real,
         test_filter_hallucinations_consecutive,
         test_detect_speech_segments_mocked,
+        test_merge_filler_blocks,
+        test_merge_filler_blocks_first,
+        test_merge_filler_preserves_substantive,
     ]
     failed = 0
     for test in tests:

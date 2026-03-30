@@ -375,6 +375,52 @@ def filter_hallucinations(blocks: list[dict]) -> list[dict]:
     return result
 
 
+FILLER_WORDS = {
+    "yeah", "hmm", "um", "okay", "uh", "mm-hmm", "right", "sure",
+    "so", "yep", "mhm", "uh-huh", "oh", "ah", "mmm", "hm",
+}
+
+
+def merge_filler_blocks(blocks: list[dict]) -> list[dict]:
+    """Merge short filler-only blocks into adjacent blocks.
+
+    A block is filler if it has <= 5 words and all words (stripped of
+    punctuation) are in the FILLER_WORDS set.
+    """
+    if not blocks:
+        return blocks
+
+    def is_filler(block: dict) -> bool:
+        words = block["text"].strip().split()
+        if len(words) > 5:
+            return False
+        stripped = [w.strip(".,!?:;'\"").lower() for w in words]
+        return all(w in FILLER_WORDS for w in stripped if w)
+
+    # Tag each block
+    filler_flags = [is_filler(b) for b in blocks]
+
+    result = []
+    for i, block in enumerate(blocks):
+        if filler_flags[i]:
+            if result:
+                # Merge into previous block
+                result[-1]["text"] = result[-1]["text"].rstrip() + " " + block["text"].strip()
+            else:
+                # First block is filler — find next non-filler and prepend
+                for j in range(i + 1, len(blocks)):
+                    if not filler_flags[j]:
+                        blocks[j]["text"] = block["text"].strip() + " " + blocks[j]["text"]
+                        break
+        else:
+            result.append(block)
+
+    merged_count = len(blocks) - len(result)
+    if merged_count:
+        print(f"  Merged {merged_count} filler blocks")
+    return result
+
+
 def load_openai_api_key() -> str | None:
     """Load OpenAI API key from environment or .env file."""
     token = os.environ.get("OPENAI_API_KEY")
