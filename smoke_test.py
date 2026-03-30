@@ -22,6 +22,7 @@ from transcribe import (
     generate_summary,
     infer_speaker_names,
     merge_filler_blocks,
+    name_speakers_in_files,
     normalize_speaker_names,
     parse_args,
     polish_transcript,
@@ -666,6 +667,58 @@ def test_parse_args_name_speakers():
     print("  parse_args (--name-speakers): OK")
 
 
+def test_name_speakers_in_files():
+    """Test that --name-speakers replaces generic names in body and frontmatter."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create a transcript with generic speaker names
+        md_content = """---
+title: test-interview
+date: 2026-03-29
+source_file: test.wav
+duration: 15s
+language: en
+speakers:
+  - Speaker 1
+  - Speaker 2
+tags:
+  - transcript
+  - interview
+---
+
+# test-interview
+
+## Transcript
+
+**[00:01] Speaker 1:**
+Hi, I'm the hiring manager at Acme Corp.
+
+**[00:10] Speaker 2:**
+Thanks for having me, I'm really excited about this role.
+
+**[00:20] Speaker 1:**
+Tell me about your background.
+"""
+        (tmpdir / "test-interview.md").write_text(md_content)
+
+        # Simulate user input: name Speaker 1 as "Smith (Acme)", Speaker 2 as "Jones"
+        with patch("builtins.input", side_effect=["Smith (Acme)", "Jones"]):
+            name_speakers_in_files(tmpdir)
+
+        result = (tmpdir / "test-interview.md").read_text()
+        assert "Speaker 1" not in result
+        assert "Speaker 2" not in result
+        assert "Smith (Acme)" in result
+        assert "Jones" in result
+        # Check frontmatter too
+        assert "  - Smith (Acme)" in result
+        assert "  - Jones" in result
+    print("  name_speakers_in_files: OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -705,6 +758,7 @@ def main():
         test_parse_args_skip_speakers,
         test_parse_args_auto,
         test_parse_args_name_speakers,
+        test_name_speakers_in_files,
     ]
     failed = 0
     for test in tests:

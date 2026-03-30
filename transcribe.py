@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -940,6 +941,84 @@ DEFAULT_OUTPUT_DIR = Path(
     "/00. Top Folder/04-obsidian-vaults/jerrison-personal-gdrive"
     "/00-Recruiting/03-transcripts"
 )
+
+
+def name_speakers_in_files(output_dir: Path):
+    """Scan transcripts for generic 'Speaker N' names and prompt for real names.
+
+    Reads each .md file in output_dir, finds files with generic speaker names,
+    shows distinctive passages, and prompts the user to provide real names.
+    """
+    if not output_dir.exists():
+        print(f"Error: Output directory not found: {output_dir}")
+        sys.exit(1)
+
+    md_files = sorted(output_dir.glob("*.md"))
+    if not md_files:
+        print(f"No transcript files found in {output_dir}")
+        return
+
+    # Find files with generic speaker names
+    speaker_pattern = re.compile(r"Speaker \d+")
+    files_to_name = []
+    for md_file in md_files:
+        content = md_file.read_text()
+        generic_speakers = sorted(set(speaker_pattern.findall(content)))
+        if generic_speakers:
+            files_to_name.append((md_file, generic_speakers))
+
+    if not files_to_name:
+        print("All transcripts already have named speakers. Nothing to do.")
+        return
+
+    print(f"Found {len(files_to_name)} transcripts with unnamed speakers.\n")
+
+    for md_file, generic_speakers in files_to_name:
+        content = md_file.read_text()
+        print(f"\n{'=' * 50}")
+        print(f"File: {md_file.name}")
+        print(f"Unnamed speakers: {', '.join(generic_speakers)}")
+
+        # Extract blocks for passage display
+        block_pattern = re.compile(
+            r"\*\*\[[\d:]+\] (.+?):\*\*\n(.+?)(?=\n\n|\Z)", re.DOTALL
+        )
+        blocks_by_speaker = {}
+        for match in block_pattern.finditer(content):
+            speaker = match.group(1)
+            text = match.group(2).strip()
+            if speaker in generic_speakers:
+                blocks_by_speaker.setdefault(speaker, []).append(text)
+
+        name_map = {}
+        for speaker in generic_speakers:
+            passages = blocks_by_speaker.get(speaker, [])
+            # Show longest/most distinctive passages
+            substantive = [p for p in passages if len(p) > 30]
+            substantive.sort(key=len, reverse=True)
+
+            print(f"\n  {speaker}:")
+            if substantive:
+                print(f"    Passages:")
+                for p in substantive[:3]:
+                    display = p[:150] + "..." if len(p) > 150 else p
+                    print(f"      > {display}")
+
+            answer = input(f"    Name for {speaker}? [skip]: ").strip()
+            if answer and answer.lower() != "skip":
+                name_map[speaker] = answer
+                print(f"    \u2713 {speaker} \u2192 {answer}")
+            else:
+                print(f"    - Keeping \"{speaker}\"")
+
+        # Apply replacements
+        if name_map:
+            for old_name, new_name in name_map.items():
+                content = content.replace(old_name, new_name)
+            md_file.write_text(content)
+            print(f"\n  Updated {md_file.name}")
+
+    print(f"\nDone! Named speakers in {len(files_to_name)} files.")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
