@@ -973,81 +973,135 @@ def name_speakers_in_files(output_dir: Path):
 
     print(f"Found {len(files_to_name)} transcripts with unnamed speakers.\n")
 
+    # Phase 1: Collect name mappings for all files (no writes yet)
+    all_results = []  # list of (md_file, content, generic_speakers, name_map, suggestions)
     for md_file, generic_speakers in files_to_name:
         content = md_file.read_text()
+        blocks, suggestions = _analyze_transcript(content, generic_speakers)
+        name_map = _prompt_speaker_names(md_file.name, generic_speakers, blocks, suggestions)
+        all_results.append((md_file, content, generic_speakers, name_map, suggestions))
+
+    # Phase 2: Summary and redo loop
+    while True:
         print(f"\n{'=' * 50}")
-        print(f"File: {md_file.name}")
-        print(f"Unnamed speakers: {', '.join(generic_speakers)}")
-
-        # Extract blocks for LLM analysis and passage display
-        block_pattern = re.compile(
-            r"\*\*\[([\d:]+)\] (.+?):\*\*\n(.+?)(?=\n\n|\Z)", re.DOTALL
-        )
-        blocks = []
-        for match in block_pattern.finditer(content):
-            blocks.append({
-                "speaker": match.group(2),
-                "start": 0.0,  # timestamp not needed for LLM
-                "text": match.group(3).strip(),
-            })
-
-        # Get LLM suggestions (role, summary, suggested name)
-        suggestions = infer_speaker_names(blocks) if blocks else {}
-        if suggestions:
-            print("  LLM provided speaker suggestions.")
-
-        name_map = {}
-        for i, speaker in enumerate(generic_speakers, 1):
-            info = suggestions.get(speaker, {})
-            likely_name = info.get("likely_name")
-            role = info.get("role", "")
-            summary = info.get("summary", "")
-
-            # Collect distinctive passages
-            speaker_blocks = [b for b in blocks if b["speaker"] == speaker]
-            substantive = [b for b in speaker_blocks if len(b["text"].strip()) > 30]
-            substantive.sort(key=lambda b: len(b["text"]), reverse=True)
-
-            print(f"\n  Speaker {i} of {len(generic_speakers)}:")
-
-            if role:
-                print(f"    Role: {role}")
-            if summary:
-                print(f"    Said: {summary}")
-            if substantive:
-                print(f"    Passages:")
-                for b in substantive[:3]:
-                    text = b["text"].strip()
-                    display = text[:147] + "..." if len(text) > 150 else text
-                    print(f"      > {display}")
-
-            if likely_name:
-                print(f'    Suggested name: {likely_name}')
-                answer = input(f'\n    Accept "{likely_name}"? [Y/name]: ').strip()
-                if answer == "" or answer.lower() == "y":
-                    name_map[speaker] = likely_name
-                    print(f"    \u2713 {speaker} \u2192 {likely_name}")
-                elif answer.lower() == "skip":
-                    print(f"    - Keeping \"{speaker}\"")
-                else:
-                    name_map[speaker] = answer
-                    print(f"    \u2713 {speaker} \u2192 {answer}")
+        print("Summary:")
+        has_changes = False
+        for idx, (md_file, _, _, name_map, _) in enumerate(all_results, 1):
+            if name_map:
+                has_changes = True
+                changes = ", ".join(f"{old} \u2192 {new}" for old, new in name_map.items())
+                print(f"  {idx}. {md_file.stem}: {changes}")
             else:
-                answer = input(f"    Name for {speaker}? [skip]: ").strip()
-                if answer and answer.lower() != "skip":
-                    name_map[speaker] = answer
-                    print(f"    \u2713 {speaker} \u2192 {answer}")
-                else:
-                    print(f"    - Keeping \"{speaker}\"")
+                print(f"  {idx}. {md_file.stem}: (no changes)")
 
-        # Apply replacements
+        if not has_changes:
+            print("\nNo changes to save.")
+            return
+
+        answer = input("\nSave all? [Y/redo N]: ").strip()
+        if answer == "" or answer.lower() == "y":
+            break
+        elif answer.lower().startswith("redo"):
+            parts = answer.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                n = int(parts[1])
+                if 1 <= n <= len(all_results):
+                    md_file, content, generic_speakers, _, suggestions = all_results[n - 1]
+                    blocks, _ = _analyze_transcript(content, generic_speakers, suggestions)
+                    name_map = _prompt_speaker_names(md_file.name, generic_speakers, blocks, suggestions)
+                    all_results[n - 1] = (md_file, content, generic_speakers, name_map, suggestions)
+                    continue
+            print(f"  Invalid. Use 'redo N' where N is 1-{len(all_results)}.")
+
+    # Phase 3: Write all files
+    written = 0
+    for md_file, content, _, name_map, _ in all_results:
         if name_map:
             for old_name, new_name in name_map.items():
                 content = content.replace(old_name, new_name)
             md_file.write_text(content)
-            print(f"\n  Updated {md_file.name}")
+            written += 1
+            print(f"  Updated {md_file.name}")
 
-    print(f"\nDone! Named speakers in {len(files_to_name)} files.")
+    print(f"\nDone! Updated {written} files.")
+
+
+def _analyze_transcript(
+    content: str, generic_speakers: list[str], cached_suggestions: dict | None = None
+) -> tuple[list[dict], dict]:
+    """Extract blocks from markdown and get LLM suggestions."""
+    block_pattern = re.compile(
+        r"\*\*\[([\d:]+)\] (.+?):\*\*\n(.+?)(?=\n\n|\Z)", re.DOTALL
+    )
+    blocks = []
+    for match in block_pattern.finditer(content):
+        blocks.append({
+            "speaker": match.group(2),
+            "start": 0.0,
+            "text": match.group(3).strip(),
+        })
+
+    if cached_suggestions is not None:
+        suggestions = cached_suggestions
+    else:
+        suggestions = infer_speaker_names(blocks) if blocks else {}
+        if suggestions:
+            print("  LLM provided speaker suggestions.")
+
+    return blocks, suggestions
+
+
+def _prompt_speaker_names(
+    filename: str, generic_speakers: list[str], blocks: list[dict], suggestions: dict
+) -> dict[str, str]:
+    """Prompt user to name speakers for a single transcript. Returns name_map."""
+    print(f"\n{'=' * 50}")
+    print(f"File: {filename}")
+
+    name_map = {}
+    for i, speaker in enumerate(generic_speakers, 1):
+        info = suggestions.get(speaker, {})
+        likely_name = info.get("likely_name")
+        role = info.get("role", "")
+        summary = info.get("summary", "")
+
+        speaker_blocks = [b for b in blocks if b["speaker"] == speaker]
+        substantive = [b for b in speaker_blocks if len(b["text"].strip()) > 30]
+        substantive.sort(key=lambda b: len(b["text"]), reverse=True)
+
+        print(f"\n  Speaker {i} of {len(generic_speakers)}:")
+
+        if role:
+            print(f"    Role: {role}")
+        if summary:
+            print(f"    Said: {summary}")
+        if substantive:
+            print(f"    Passages:")
+            for b in substantive[:3]:
+                text = b["text"].strip()
+                display = text[:147] + "..." if len(text) > 150 else text
+                print(f"      > {display}")
+
+        if likely_name:
+            print(f'    Suggested name: {likely_name}')
+            answer = input(f'\n    Accept "{likely_name}"? [Y/name]: ').strip()
+            if answer == "" or answer.lower() == "y":
+                name_map[speaker] = likely_name
+                print(f"    \u2713 {speaker} \u2192 {likely_name}")
+            elif answer.lower() == "skip":
+                print(f"    - Keeping \"{speaker}\"")
+            else:
+                name_map[speaker] = answer
+                print(f"    \u2713 {speaker} \u2192 {answer}")
+        else:
+            answer = input(f"    Name for {speaker}? [skip]: ").strip()
+            if answer and answer.lower() != "skip":
+                name_map[speaker] = answer
+                print(f"    \u2713 {speaker} \u2192 {answer}")
+            else:
+                print(f"    - Keeping \"{speaker}\"")
+
+    return name_map
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

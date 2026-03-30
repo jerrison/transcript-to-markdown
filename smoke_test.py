@@ -719,10 +719,11 @@ Tell me about your background.
                 "summary": "Described their background",
             },
         }
-        # Speaker 1: override suggested "John Smith" with "Smith (Acme)"
-        # Speaker 2: override suggested "Jane Doe" with "Jones"
+        # Speaker 1: override "John Smith" with "Smith (Acme)"
+        # Speaker 2: override "Jane Doe" with "Jones"
+        # Then confirm save at summary prompt
         with patch("transcribe.infer_speaker_names", return_value=fake_suggestions), \
-             patch("builtins.input", side_effect=["Smith (Acme)", "Jones"]):
+             patch("builtins.input", side_effect=["Smith (Acme)", "Jones", "y"]):
             name_speakers_in_files(tmpdir)
 
         result = (tmpdir / "test-interview.md").read_text()
