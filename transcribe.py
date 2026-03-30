@@ -770,16 +770,30 @@ def main():
         diarization_pipeline = load_diarization_pipeline()
         print()
 
+        import time
+
         failed = []
+        elapsed_times = []
         for i, audio_file in enumerate(to_process, 1):
-            print(f"\n[{i}/{len(to_process)}] {audio_file.name}")
+            # ETA based on average processing time
+            if elapsed_times:
+                avg_time = sum(elapsed_times) / len(elapsed_times)
+                remaining = avg_time * (len(to_process) - i + 1)
+                eta = fmt_duration(remaining)
+                print(f"\n[{i}/{len(to_process)}] {audio_file.name}  (ETA: ~{eta})")
+            else:
+                print(f"\n[{i}/{len(to_process)}] {audio_file.name}")
+
+            file_start = time.time()
             try:
                 process_file(str(audio_file), args.output_dir, diarization_pipeline=diarization_pipeline)
             except Exception as e:
                 print(f"\n  ERROR: Failed to process {audio_file.name}: {e}")
                 failed.append((audio_file.name, str(e)))
+            elapsed_times.append(time.time() - file_start)
 
-        print(f"\nDone! Processed {len(to_process) - len(failed)}/{len(to_process)} files.")
+        total_time = sum(elapsed_times)
+        print(f"\nDone! Processed {len(to_process) - len(failed)}/{len(to_process)} files in {fmt_duration(total_time)}.")
         if failed:
             print(f"\nFailed files ({len(failed)}):")
             for name, error in failed:
