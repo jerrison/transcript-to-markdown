@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -521,12 +522,15 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
     print(f"Processing: {filename}")
     print("=" * 50)
 
-    # Step 1: Transcribe
-    words, info = transcribe(audio_path)
+    # Steps 1 & 2: Transcribe and diarize in parallel
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        transcribe_future = executor.submit(transcribe, audio_path)
+        diarize_future = executor.submit(diarize, audio_path, diarization_pipeline)
+
+    words, info = transcribe_future.result()
     print(f"  Transcribed {len(words)} words, language: {info.language}")
 
-    # Step 2: Diarize
-    speaker_segments = diarize(audio_path, pipeline=diarization_pipeline)
+    speaker_segments = diarize_future.result()
     unique_speakers = set(s["speaker"] for s in speaker_segments)
     print(f"  Found {len(unique_speakers)} speakers in {len(speaker_segments)} segments")
 
