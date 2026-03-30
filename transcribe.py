@@ -964,7 +964,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_OUTPUT_DIR,
         help=f"Directory for output transcripts (default: {DEFAULT_OUTPUT_DIR})",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--skip-speakers",
+        action="store_true",
+        help="Skip speaker identification (default in batch mode).",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto-accept LLM speaker name suggestions without prompting.",
+    )
+    parser.add_argument(
+        "--name-speakers",
+        action="store_true",
+        help="Post-hoc speaker naming mode: rename generic speakers in existing transcripts.",
+    )
+    args = parser.parse_args(argv)
+
+    # Mutual exclusivity: --name-speakers is standalone
+    if args.name_speakers and (args.files or args.skip_speakers or args.auto):
+        parser.error("--name-speakers cannot be combined with file args, --skip-speakers, or --auto.")
+
+    return args
 
 
 def main():

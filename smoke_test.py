@@ -645,6 +645,27 @@ def test_merge_filler_preserves_substantive():
     print("  merge_filler_preserves_substantive: OK")
 
 
+def test_parse_args_skip_speakers():
+    """Test that --skip-speakers flag is parsed."""
+    args = parse_args(["--skip-speakers"])
+    assert args.skip_speakers is True
+    print("  parse_args (--skip-speakers): OK")
+
+
+def test_parse_args_auto():
+    """Test that --auto flag is parsed."""
+    args = parse_args(["--auto"])
+    assert args.auto is True
+    print("  parse_args (--auto): OK")
+
+
+def test_parse_args_name_speakers():
+    """Test that --name-speakers flag is parsed and is mutually exclusive."""
+    args = parse_args(["--name-speakers"])
+    assert args.name_speakers is True
+    print("  parse_args (--name-speakers): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -681,6 +702,9 @@ def main():
         test_merge_filler_blocks,
         test_merge_filler_blocks_first,
         test_merge_filler_preserves_substantive,
+        test_parse_args_skip_speakers,
+        test_parse_args_auto,
+        test_parse_args_name_speakers,
     ]
     failed = 0
     for test in tests:
