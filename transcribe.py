@@ -979,37 +979,66 @@ def name_speakers_in_files(output_dir: Path):
         print(f"File: {md_file.name}")
         print(f"Unnamed speakers: {', '.join(generic_speakers)}")
 
-        # Extract blocks for passage display
+        # Extract blocks for LLM analysis and passage display
         block_pattern = re.compile(
-            r"\*\*\[[\d:]+\] (.+?):\*\*\n(.+?)(?=\n\n|\Z)", re.DOTALL
+            r"\*\*\[([\d:]+)\] (.+?):\*\*\n(.+?)(?=\n\n|\Z)", re.DOTALL
         )
-        blocks_by_speaker = {}
+        blocks = []
         for match in block_pattern.finditer(content):
-            speaker = match.group(1)
-            text = match.group(2).strip()
-            if speaker in generic_speakers:
-                blocks_by_speaker.setdefault(speaker, []).append(text)
+            blocks.append({
+                "speaker": match.group(2),
+                "start": 0.0,  # timestamp not needed for LLM
+                "text": match.group(3).strip(),
+            })
+
+        # Get LLM suggestions (role, summary, suggested name)
+        suggestions = infer_speaker_names(blocks) if blocks else {}
+        if suggestions:
+            print("  LLM provided speaker suggestions.")
 
         name_map = {}
-        for speaker in generic_speakers:
-            passages = blocks_by_speaker.get(speaker, [])
-            # Show longest/most distinctive passages
-            substantive = [p for p in passages if len(p) > 30]
-            substantive.sort(key=len, reverse=True)
+        for i, speaker in enumerate(generic_speakers, 1):
+            info = suggestions.get(speaker, {})
+            likely_name = info.get("likely_name")
+            role = info.get("role", "")
+            summary = info.get("summary", "")
 
-            print(f"\n  {speaker}:")
+            # Collect distinctive passages
+            speaker_blocks = [b for b in blocks if b["speaker"] == speaker]
+            substantive = [b for b in speaker_blocks if len(b["text"].strip()) > 30]
+            substantive.sort(key=lambda b: len(b["text"]), reverse=True)
+
+            print(f"\n  Speaker {i} of {len(generic_speakers)}:")
+
+            if role:
+                print(f"    Role: {role}")
+            if summary:
+                print(f"    Said: {summary}")
             if substantive:
                 print(f"    Passages:")
-                for p in substantive[:3]:
-                    display = p[:150] + "..." if len(p) > 150 else p
+                for b in substantive[:3]:
+                    text = b["text"].strip()
+                    display = text[:147] + "..." if len(text) > 150 else text
                     print(f"      > {display}")
 
-            answer = input(f"    Name for {speaker}? [skip]: ").strip()
-            if answer and answer.lower() != "skip":
-                name_map[speaker] = answer
-                print(f"    \u2713 {speaker} \u2192 {answer}")
+            if likely_name:
+                print(f'    Suggested name: {likely_name}')
+                answer = input(f'\n    Accept "{likely_name}"? [Y/name]: ').strip()
+                if answer == "" or answer.lower() == "y":
+                    name_map[speaker] = likely_name
+                    print(f"    \u2713 {speaker} \u2192 {likely_name}")
+                elif answer.lower() == "skip":
+                    print(f"    - Keeping \"{speaker}\"")
+                else:
+                    name_map[speaker] = answer
+                    print(f"    \u2713 {speaker} \u2192 {answer}")
             else:
-                print(f"    - Keeping \"{speaker}\"")
+                answer = input(f"    Name for {speaker}? [skip]: ").strip()
+                if answer and answer.lower() != "skip":
+                    name_map[speaker] = answer
+                    print(f"    \u2713 {speaker} \u2192 {answer}")
+                else:
+                    print(f"    - Keeping \"{speaker}\"")
 
         # Apply replacements
         if name_map:

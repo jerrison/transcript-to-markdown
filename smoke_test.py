@@ -704,8 +704,25 @@ Tell me about your background.
 """
         (tmpdir / "test-interview.md").write_text(md_content)
 
-        # Simulate user input: name Speaker 1 as "Smith (Acme)", Speaker 2 as "Jones"
-        with patch("builtins.input", side_effect=["Smith (Acme)", "Jones"]):
+        # Mock LLM suggestions and simulate user accepting/overriding
+        fake_suggestions = {
+            "Speaker 1": {
+                "likely_name": "John Smith",
+                "confidence": "high",
+                "role": "Hiring Manager",
+                "summary": "Asked interview questions",
+            },
+            "Speaker 2": {
+                "likely_name": "Jane Doe",
+                "confidence": "medium",
+                "role": "Candidate",
+                "summary": "Described their background",
+            },
+        }
+        # Speaker 1: override suggested "John Smith" with "Smith (Acme)"
+        # Speaker 2: override suggested "Jane Doe" with "Jones"
+        with patch("transcribe.infer_speaker_names", return_value=fake_suggestions), \
+             patch("builtins.input", side_effect=["Smith (Acme)", "Jones"]):
             name_speakers_in_files(tmpdir)
 
         result = (tmpdir / "test-interview.md").read_text()
