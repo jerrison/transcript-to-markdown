@@ -47,7 +47,7 @@ def transcribe(audio_path: str) -> list[dict]:
     print("Transcribing audio with mlx-whisper (Apple Silicon GPU)...")
     result = mlx_whisper.transcribe(
         audio_path,
-        path_or_hf_repo="mlx-community/whisper-large-v3",
+        path_or_hf_repo="mlx-community/whisper-large-v3-mlx",
         word_timestamps=True,
     )
 
