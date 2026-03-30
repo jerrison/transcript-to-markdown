@@ -8,6 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
+from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
+
+SAMPLE_RATE = 16000  # Silero VAD requires 16kHz
+
 
 def fmt_timestamp(seconds: float) -> str:
     """Format seconds as MM:SS or HH:MM:SS."""
@@ -74,6 +78,86 @@ def transcribe(audio_path: str) -> list[dict]:
     )
 
     return words, info
+
+
+def detect_speech_segments(audio_path: str) -> list[dict]:
+    """Use Silero VAD to find speech regions in the audio.
+
+    Returns list of {"start": float, "end": float} in seconds.
+    """
+    model = load_silero_vad()
+    wav = read_audio(audio_path)
+    timestamps = get_speech_timestamps(wav, model)
+
+    # Convert sample indices to seconds
+    segments = []
+    for ts in timestamps:
+        segments.append({
+            "start": ts["start"] / SAMPLE_RATE,
+            "end": ts["end"] / SAMPLE_RATE,
+        })
+
+    print(f"  VAD found {len(segments)} speech segments")
+    return segments
+
+
+def prepare_vad_audio(audio_path: str, speech_segments: list[dict]) -> tuple[str, list]:
+    """Concatenate speech-only portions into a temp WAV file.
+
+    Returns (temp_file_path, offset_map) where offset_map is a list of
+    (trimmed_start, original_start, duration) tuples for timestamp remapping.
+    """
+    import torchaudio
+    import tempfile
+    import torch
+
+    waveform, sr = torchaudio.load(audio_path)
+
+    # Mix to mono if stereo
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+
+    chunks = []
+    offset_map = []
+    trimmed_pos = 0.0
+
+    for seg in speech_segments:
+        start_sample = int(seg["start"] * sr)
+        end_sample = int(seg["end"] * sr)
+        chunk = waveform[:, start_sample:end_sample]
+        chunks.append(chunk)
+
+        duration = seg["end"] - seg["start"]
+        offset_map.append((trimmed_pos, seg["start"], duration))
+        trimmed_pos += duration
+
+    if chunks:
+        import torch
+        combined = torch.cat(chunks, dim=1)
+    else:
+        combined = waveform  # No speech found, use original
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    torchaudio.save(tmp.name, combined, sr)
+    tmp.close()
+
+    return tmp.name, offset_map
+
+
+def remap_timestamps(words: list[dict], offset_map: list) -> list[dict]:
+    """Remap word timestamps from trimmed audio back to original timeline.
+
+    offset_map: list of (trimmed_start, original_start, duration)
+    """
+    for word in words:
+        for trimmed_start, original_start, duration in offset_map:
+            trimmed_end = trimmed_start + duration
+            if trimmed_start <= word["start"] < trimmed_end:
+                offset = original_start - trimmed_start
+                word["start"] += offset
+                word["end"] += offset
+                break
+    return words
 
 
 def load_hf_token() -> str:

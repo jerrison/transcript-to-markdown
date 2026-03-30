@@ -13,6 +13,7 @@ from transcribe import (
     assign_speakers,
     build_blocks,
     confirm_speakers,
+    detect_speech_segments,
     discover_audio_files,
     filter_hallucinations,
     fmt_duration,
@@ -575,6 +576,34 @@ def test_filter_hallucinations_consecutive():
     print("  filter_hallucinations (consecutive): OK")
 
 
+def test_detect_speech_segments_mocked():
+    """Test detect_speech_segments with mocked Silero VAD."""
+    from unittest.mock import MagicMock, patch
+    import torch
+
+    # Mock a 16kHz mono audio tensor (10 seconds = 160000 samples)
+    fake_wav = torch.zeros(160000)
+
+    # Mock VAD returning two speech segments
+    fake_timestamps = [
+        {"start": 16000, "end": 80000},   # 1.0s - 5.0s
+        {"start": 96000, "end": 144000},   # 6.0s - 9.0s
+    ]
+
+    with patch("transcribe.load_silero_vad") as mock_load, \
+         patch("transcribe.read_audio", return_value=fake_wav) as mock_read, \
+         patch("transcribe.get_speech_timestamps", return_value=fake_timestamps):
+        mock_load.return_value = MagicMock()
+        result = detect_speech_segments("fake_audio.wav")
+
+    assert len(result) == 2
+    assert abs(result[0]["start"] - 1.0) < 0.01
+    assert abs(result[0]["end"] - 5.0) < 0.01
+    assert abs(result[1]["start"] - 6.0) < 0.01
+    assert abs(result[1]["end"] - 9.0) < 0.01
+    print("  detect_speech_segments (mocked): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -607,6 +636,7 @@ def main():
         test_filter_hallucinations,
         test_filter_hallucinations_preserves_real,
         test_filter_hallucinations_consecutive,
+        test_detect_speech_segments_mocked,
     ]
     failed = 0
     for test in tests:
