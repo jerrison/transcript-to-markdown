@@ -92,11 +92,10 @@ def load_hf_token() -> str:
     sys.exit(1)
 
 
-def diarize(audio_path: str) -> list[dict]:
-    """Run pyannote speaker diarization, return list of speaker segments."""
+def load_diarization_pipeline():
+    """Load and return the pyannote diarization pipeline for reuse."""
     import torch
     from pyannote.audio import Pipeline
-    from pyannote.audio.pipelines.utils.hook import ProgressHook
 
     hf_token = load_hf_token()
 
@@ -111,6 +110,16 @@ def diarize(audio_path: str) -> list[dict]:
         pipeline.to(torch.device("mps"))
     else:
         print("Using CPU (MPS not available)")
+
+    return pipeline
+
+
+def diarize(audio_path: str, pipeline=None) -> list[dict]:
+    """Run pyannote speaker diarization, return list of speaker segments."""
+    from pyannote.audio.pipelines.utils.hook import ProgressHook
+
+    if pipeline is None:
+        pipeline = load_diarization_pipeline()
 
     print("Diarizing audio...")
     with ProgressHook() as hook:
@@ -501,7 +510,7 @@ def discover_audio_files(input_dir: Path) -> list[Path]:
     ]
 
 
-def process_file(audio_path: str, output_dir: Path) -> Path:
+def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -> Path:
     """Run the full transcription pipeline on a single audio file.
 
     Returns the path to the written markdown transcript.
@@ -517,7 +526,7 @@ def process_file(audio_path: str, output_dir: Path) -> Path:
     print(f"  Transcribed {len(words)} words, language: {info.language}")
 
     # Step 2: Diarize
-    speaker_segments = diarize(audio_path)
+    speaker_segments = diarize(audio_path, pipeline=diarization_pipeline)
     unique_speakers = set(s["speaker"] for s in speaker_segments)
     print(f"  Found {len(unique_speakers)} speakers in {len(speaker_segments)} segments")
 
@@ -631,11 +640,16 @@ def main():
             print("All files already transcribed. Nothing to do.")
             sys.exit(0)
 
+        # Load models once for batch processing
+        print("Loading models...")
+        diarization_pipeline = load_diarization_pipeline()
+        print()
+
         failed = []
         for i, audio_file in enumerate(to_process, 1):
             print(f"\n[{i}/{len(to_process)}] {audio_file.name}")
             try:
-                process_file(str(audio_file), args.output_dir)
+                process_file(str(audio_file), args.output_dir, diarization_pipeline=diarization_pipeline)
             except Exception as e:
                 print(f"\n  ERROR: Failed to process {audio_file.name}: {e}")
                 failed.append((audio_file.name, str(e)))
