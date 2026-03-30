@@ -224,6 +224,74 @@ def build_blocks(words: list[dict], pause_threshold: float = 1.5) -> list[dict]:
     return blocks
 
 
+KNOWN_HALLUCINATIONS = {
+    "thank you.", "thanks for watching.", "please subscribe.",
+    "bye.", "thank you for watching.", "thanks for watching",
+    "thank you", "bye",
+}
+
+
+def filter_hallucinations(blocks: list[dict]) -> list[dict]:
+    """Remove blocks that are Whisper hallucinations from silence.
+
+    Detects: known hallucination phrases, consecutive repetition (3+),
+    and internal repetition (same short phrase repeated 5+ times).
+    """
+    if not blocks:
+        return blocks
+
+    # Mark blocks for removal
+    remove = [False] * len(blocks)
+
+    for i, block in enumerate(blocks):
+        text = block["text"].strip()
+        text_lower = text.lower().rstrip(".")
+
+        # Heuristic 1: Known hallucination phrases (standalone)
+        if text.lower() in KNOWN_HALLUCINATIONS:
+            remove[i] = True
+            continue
+
+        # Heuristic 2: Internal repetition — same short phrase repeated 5+ times
+        words = text.split()
+        if len(words) >= 5:
+            for unit_len in range(1, 4):
+                if len(words) < unit_len * 5:
+                    continue
+                unit = " ".join(words[:unit_len]).lower().strip(".,!?")
+                if not unit:
+                    continue
+                repetitions = 0
+                for j in range(0, len(words), unit_len):
+                    chunk = " ".join(words[j:j + unit_len]).lower().strip(".,!?")
+                    if chunk == unit:
+                        repetitions += 1
+                    else:
+                        break
+                if repetitions >= 5:
+                    remove[i] = True
+                    break
+
+    # Heuristic 3: Consecutive identical blocks (run of 3+)
+    i = 0
+    while i < len(blocks):
+        run_start = i
+        text_i = blocks[i]["text"].strip().lower()
+        while i + 1 < len(blocks) and blocks[i + 1]["text"].strip().lower() == text_i:
+            i += 1
+        run_length = i - run_start + 1
+        if run_length >= 3:
+            for j in range(run_start, run_start + run_length):
+                remove[j] = True
+        i += 1
+
+    result = [b for b, r in zip(blocks, remove) if not r]
+    removed_count = len(blocks) - len(result)
+    if removed_count:
+        print(f"  Filtered {removed_count} hallucinated blocks")
+    return result
+
+
 def load_openai_api_key() -> str | None:
     """Load OpenAI API key from environment or .env file."""
     token = os.environ.get("OPENAI_API_KEY")

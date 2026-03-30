@@ -14,6 +14,7 @@ from transcribe import (
     build_blocks,
     confirm_speakers,
     discover_audio_files,
+    filter_hallucinations,
     fmt_duration,
     fmt_timestamp,
     format_markdown,
@@ -529,6 +530,37 @@ def test_format_markdown_with_summary():
     print("  format_markdown (with summary): OK")
 
 
+def test_filter_hallucinations():
+    """Test that hallucination patterns are removed."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Thank you."},
+        {"speaker": "Speaker 1", "start": 30.0, "text": "Thank you."},
+        {"speaker": "Speaker 2", "start": 60.0, "text": "Thank you."},
+        {"speaker": "Speaker 1", "start": 90.0, "text": "Thank you."},
+        {"speaker": "Speaker 1", "start": 120.0, "text": "Bye bye bye bye bye bye bye bye bye bye"},
+        {"speaker": "Speaker 1", "start": 600.0, "text": "So I started my career at Lyft."},
+        {"speaker": "Speaker 2", "start": 610.0, "text": "Tell me more about that."},
+    ]
+    result = filter_hallucinations(blocks)
+    assert len(result) == 2, f"Expected 2 blocks, got {len(result)}: {[b['text'] for b in result]}"
+    assert result[0]["text"] == "So I started my career at Lyft."
+    assert result[1]["text"] == "Tell me more about that."
+    print("  filter_hallucinations: OK")
+
+
+def test_filter_hallucinations_preserves_real():
+    """Test that real dialogue blocks are not removed."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Thank you for joining us today."},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "Thanks for having me, I appreciate the opportunity."},
+        {"speaker": "Speaker 1", "start": 10.0, "text": "Yeah."},
+        {"speaker": "Speaker 2", "start": 15.0, "text": "Let me tell you about my experience."},
+    ]
+    result = filter_hallucinations(blocks)
+    assert len(result) == 4, f"Expected 4 blocks, got {len(result)}"
+    print("  filter_hallucinations (preserves real): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -558,6 +590,8 @@ def main():
         test_generate_summary_mocked,
         test_generate_summary_no_key,
         test_format_markdown_with_summary,
+        test_filter_hallucinations,
+        test_filter_hallucinations_preserves_real,
     ]
     failed = 0
     for test in tests:
