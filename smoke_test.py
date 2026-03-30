@@ -17,6 +17,7 @@ from transcribe import (
     fmt_duration,
     fmt_timestamp,
     format_markdown,
+    generate_summary,
     infer_speaker_names,
     normalize_speaker_names,
     parse_args,
@@ -471,6 +472,63 @@ def test_polish_transcript_no_key():
     print("  polish_transcript (no key): OK")
 
 
+def test_generate_summary_mocked():
+    """Test generate_summary with mocked LLM response."""
+    blocks = [
+        {"speaker": "Speaker 1", "start": 0.0, "text": "Let's discuss the project timeline."},
+        {"speaker": "Speaker 2", "start": 5.0, "text": "We should aim for Q2 launch."},
+    ]
+
+    from unittest.mock import MagicMock
+
+    mock_message = MagicMock()
+    mock_message.content = "- Discussed project timeline\n- Targeting Q2 launch"
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_response
+
+    with patch("transcribe.load_openai_api_key", return_value="fake-key"), \
+         patch("openai.OpenAI", return_value=mock_client):
+        result = generate_summary(blocks)
+
+    assert "Q2" in result
+    print("  generate_summary (mocked): OK")
+
+
+def test_generate_summary_no_key():
+    """Test generate_summary returns empty string when no API key."""
+    blocks = [{"speaker": "Speaker 1", "start": 0.0, "text": "Hello"}]
+
+    with patch("transcribe.load_openai_api_key", return_value=None), \
+         patch("transcribe.load_google_api_key", return_value=None):
+        result = generate_summary(blocks)
+
+    assert result == ""
+    print("  generate_summary (no key): OK")
+
+
+def test_format_markdown_with_summary():
+    """Test that format_markdown includes summary section when provided."""
+    blocks = [{"speaker": "Speaker 1", "start": 0.0, "text": "Hello"}]
+    md = format_markdown(
+        filename="test.wav",
+        blocks=blocks,
+        duration=15.0,
+        language="en",
+        num_speakers=1,
+        summary="- Key point one\n- Key point two",
+    )
+    assert "## Summary" in md
+    assert "Key point one" in md
+    assert "## Transcript" in md
+    # Summary should come before Transcript
+    assert md.index("## Summary") < md.index("## Transcript")
+    print("  format_markdown (with summary): OK")
+
+
 def main():
     print("Running smoke tests...")
     tests = [
@@ -497,6 +555,9 @@ def main():
         test_parse_args_with_files,
         test_polish_transcript_mocked,
         test_polish_transcript_no_key,
+        test_generate_summary_mocked,
+        test_generate_summary_no_key,
+        test_format_markdown_with_summary,
     ]
     failed = 0
     for test in tests:

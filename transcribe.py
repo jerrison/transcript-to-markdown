@@ -422,6 +422,55 @@ Transcript:
     return blocks
 
 
+def generate_summary(blocks: list[dict]) -> str:
+    """Use LLM to generate a brief interview summary.
+
+    Returns a markdown-formatted summary string, or empty string on failure.
+    """
+    openai_key = load_openai_api_key()
+    if not openai_key:
+        google_key = load_google_api_key()
+        if not google_key:
+            return ""
+
+    # Build transcript for summarization
+    lines = []
+    for b in blocks:
+        lines.append(f"{b['speaker']}: {b['text']}")
+    transcript = "\n".join(lines)
+
+    prompt = f"""Summarize this interview transcript concisely. Include:
+- Key topics discussed
+- Important decisions or action items
+- Notable quotes or insights
+
+Keep it to 3-5 bullet points. Use plain text (no markdown formatting beyond bullet points).
+
+Transcript:
+{transcript}"""
+
+    try:
+        if openai_key:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
+            response = client.chat.completions.create(
+                model="gpt-5.4",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content.strip()
+        else:
+            from google import genai
+            client = genai.Client(api_key=google_key)
+            response = client.models.generate_content(
+                model="gemini-3-flash-preview",
+                contents=prompt,
+            )
+            return response.text.strip()
+    except Exception as e:
+        print(f"  Warning: LLM summary generation failed: {e}")
+        return ""
+
+
 def confirm_speakers(suggestions: dict, blocks: list[dict]) -> dict[str, str]:
     """Interactive CLI flow to confirm or correct speaker name suggestions.
 
@@ -504,6 +553,7 @@ def format_markdown(
     language: str,
     num_speakers: int,
     speakers: list[str] | None = None,
+    summary: str = "",
 ) -> str:
     """Format dialogue blocks as Obsidian-friendly markdown with YAML frontmatter."""
     stem = Path(filename).stem
@@ -536,6 +586,19 @@ def format_markdown(
         "",
         "---",
         "",
+    ]
+
+    if summary:
+        lines += [
+            "## Summary",
+            "",
+            summary,
+            "",
+            "---",
+            "",
+        ]
+
+    lines += [
         "## Transcript",
         "",
     ]
@@ -601,7 +664,12 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
     # Collect final speaker names for metadata
     final_speakers = sorted(set(b["speaker"] for b in blocks))
 
-    # Step 7: Format and save
+    # Step 7: Generate summary
+    summary = generate_summary(blocks)
+    if summary:
+        print("  Generated interview summary")
+
+    # Step 8: Format and save
     markdown = format_markdown(
         filename=filename,
         blocks=blocks,
@@ -609,6 +677,7 @@ def process_file(audio_path: str, output_dir: Path, diarization_pipeline=None) -
         language=info.language,
         num_speakers=len(unique_speakers),
         speakers=final_speakers,
+        summary=summary,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
